@@ -4,6 +4,8 @@ import logo from "./Screenshot 2026-11-26 142429.png";
 import { supabase } from "./supabase";
 
 const ADMIN_EMAIL = "rieksraais@gmail.com";
+const WHATSAPP_NUMBER = "260573503571";
+const STORAGE_BUCKET = "product-images";
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true);
@@ -13,23 +15,21 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [categories, setCategories] = useState([]);
-  const [categoriesLoading, setCategoriesLoading] = useState(true);
-  const [categoryName, setCategoryName] = useState("");
-  const [editingCategoryId, setEditingCategoryId] = useState(null);
-  const [editingCategoryName, setEditingCategoryName] = useState("");
-  const [categoryError, setCategoryError] = useState("");
-  const [categorySuccess, setCategorySuccess] = useState("");
+  const [products, setProducts] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(true);
 
-  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [productFile, setProductFile] = useState(null);
+  const [productPrice, setProductPrice] = useState("");
+  const [productSaving, setProductSaving] = useState(false);
+  const [productError, setProductError] = useState("");
+  const [productSuccess, setProductSuccess] = useState("");
 
-  // Restore the admin session and listen for login/logout changes.
   useEffect(() => {
     if (!supabase) return;
 
     supabase.auth.getSession().then(({ data, error }) => {
       if (error) {
-        console.error("Session error:", error.message);
+        console.error(error.message);
         return;
       }
 
@@ -51,34 +51,32 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Load categories from Supabase.
-  async function loadCategories() {
+  async function loadProducts() {
     if (!supabase) {
-      setCategoryError("The database connection is not configured.");
-      setCategoriesLoading(false);
+      setProductError("The database connection is not configured.");
+      setProductsLoading(false);
       return;
     }
 
-    setCategoriesLoading(true);
+    setProductsLoading(true);
 
     const { data, error } = await supabase
-      .from("categories")
-      .select("*")
-      .order("created_at", { ascending: true });
+      .from("products")
+      .select("id, price, image_path");
 
     if (error) {
-      setCategoryError("Could not load categories. Please refresh the page.");
-      console.error("Category loading error:", error.message);
+      setProductError("Could not load products. Please refresh the page.");
+      console.error("Product loading error:", error.message);
     } else {
-      setCategories(data || []);
-      setCategoryError("");
+      setProducts(data || []);
+      setProductError("");
     }
 
-    setCategoriesLoading(false);
+    setProductsLoading(false);
   }
 
   useEffect(() => {
-    loadCategories();
+    loadProducts();
   }, []);
 
   async function handleLogin(event) {
@@ -121,115 +119,133 @@ export default function App() {
 
     setIsAdmin(false);
     setShowLogin(false);
-    setSelectedCategory("all");
   }
 
-  // Add a new category.
-  async function handleAddCategory(event) {
+  async function handleAddProduct(event) {
     event.preventDefault();
 
-    const cleanName = categoryName.trim();
+    setProductError("");
+    setProductSuccess("");
 
-    setCategoryError("");
-    setCategorySuccess("");
-
-    if (!cleanName) return;
-
-    if (
-      categories.some(
-        (category) =>
-          category.name.toLowerCase() === cleanName.toLowerCase()
-      )
-    ) {
-      setCategoryError("That category already exists.");
+    if (!supabase) {
+      setProductError("The database connection is not configured.");
       return;
     }
 
-    const { error } = await supabase
-      .from("categories")
-      .insert({ name: cleanName });
-
-    if (error) {
-      setCategoryError("Could not add category. Please try again.");
-      console.error("Add category error:", error.message);
+    if (!productFile) {
+      setProductError("Please choose a product picture.");
       return;
     }
 
-    setCategoryName("");
-    setCategorySuccess("Category added successfully!");
-    await loadCategories();
+    const price = Number(productPrice);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      setProductError("Please enter a valid price greater than zero.");
+      return;
+    }
+
+    if (!productFile.type.startsWith("image/")) {
+      setProductError("Please choose an image file.");
+      return;
+    }
+
+    if (productFile.size > 8 * 1024 * 1024) {
+      setProductError("The image must be smaller than 8 MB.");
+      return;
+    }
+
+    setProductSaving(true);
+
+    const safeName = productFile.name.replace(
+      /[^a-zA-Z0-9._-]/g,
+      "-"
+    );
+
+    const imagePath = `${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(imagePath, productFile, {
+        cacheControl: "3600",
+        upsert: false
+      });
+
+    if (uploadError) {
+      setProductError("Could not upload the picture. Please try again.");
+      console.error("Image upload error:", uploadError.message);
+      setProductSaving(false);
+      return;
+    }
+
+    const { error: insertError } = await supabase
+      .from("products")
+      .insert({
+        price,
+        image_path: imagePath
+      });
+
+    if (insertError) {
+      await supabase.storage
+        .from(STORAGE_BUCKET)
+        .remove([imagePath]);
+
+      setProductError("Could not save the product. Please try again.");
+      console.error("Product save error:", insertError.message);
+      setProductSaving(false);
+      return;
+    }
+
+    setProductFile(null);
+    setProductPrice("");
+    event.target.reset();
+
+    setProductSuccess("Product added successfully!");
+    setProductSaving(false);
+
+    await loadProducts();
   }
 
-  // Save a renamed category.
-  async function handleRenameCategory(event, id) {
-    event.preventDefault();
-
-    const cleanName = editingCategoryName.trim();
-
-    setCategoryError("");
-    setCategorySuccess("");
-
-    if (!cleanName) {
-      setCategoryError("Please enter a category name.");
-      return;
-    }
-
-    if (
-      categories.some(
-        (category) =>
-          category.id !== id &&
-          category.name.toLowerCase() === cleanName.toLowerCase()
-      )
-    ) {
-      setCategoryError("That category already exists.");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("categories")
-      .update({ name: cleanName })
-      .eq("id", id);
-
-    if (error) {
-      setCategoryError("Could not rename category. Please try again.");
-      console.error("Rename category error:", error.message);
-      return;
-    }
-
-    setEditingCategoryId(null);
-    setEditingCategoryName("");
-    setCategorySuccess("Category renamed successfully!");
-    await loadCategories();
-  }
-
-  // Delete a category.
-  async function handleDeleteCategory(id) {
+  async function handleDeleteProduct(product) {
     const confirmed = window.confirm(
-      "Are you sure you want to delete this category?"
+      "Are you sure you want to remove this product?"
     );
 
     if (!confirmed) return;
 
-    setCategoryError("");
-    setCategorySuccess("");
+    setProductError("");
+    setProductSuccess("");
 
     const { error } = await supabase
-      .from("categories")
+      .from("products")
       .delete()
-      .eq("id", id);
+      .eq("id", product.id);
 
     if (error) {
-      setCategoryError("Could not delete category. Please try again.");
-      console.error("Delete category error:", error.message);
+      setProductError("Could not delete the product.");
+      console.error("Product deletion error:", error.message);
       return;
     }
 
-    if (selectedCategory === id) {
-      setSelectedCategory("all");
+    if (product.image_path) {
+      const { error: storageError } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .remove([product.image_path]);
+
+      if (storageError) {
+        console.error("Image cleanup error:", storageError.message);
+      }
     }
 
-    setCategorySuccess("Category deleted successfully!");
-    await loadCategories();
+    setProductSuccess("Product removed.");
+    await loadProducts();
+  }
+
+  function getImageUrl(imagePath) {
+    const { data } = supabase.storage
+      .from(STORAGE_BUCKET)
+      .getPublicUrl(imagePath);
+
+    return data.publicUrl;
   }
 
   return (
@@ -297,7 +313,9 @@ export default function App() {
             </button>
           </form>
 
-          {error && <p className="admin-error" role="alert">{error}</p>}
+          {error && (
+            <p className="admin-error" role="alert">{error}</p>
+          )}
 
           <button onClick={() => setShowLogin(false)}>
             Close
@@ -309,173 +327,134 @@ export default function App() {
         <section className="admin-dashboard">
           <div className="admin-heading">
             <h1>Welcome, Admin!</h1>
-            <p>
-              Manage your M+J 3D Printing catalogue from here.
-            </p>
+            <p>Manage your M+J 3D Printing products here.</p>
           </div>
 
           <section className="admin-section">
-            <h2>Manage Categories</h2>
+            <h2>Add a Product</h2>
+
             <p className="admin-section-description">
-              Create and organise the categories customers will see
-              in your catalogue.
+              Upload a picture and enter its price.
             </p>
 
-            <form className="admin-form" onSubmit={handleAddCategory}>
-              <input
-                className="admin-input"
-                type="text"
-                placeholder="Enter a new category name"
-                value={categoryName}
-                onChange={(event) => setCategoryName(event.target.value)}
-                maxLength={40}
-                required
-              />
+            <form
+              className="product-upload-form"
+              onSubmit={handleAddProduct}
+            >
+              <label className="product-field-label">
+                Product picture
+                <input
+                  className="admin-input"
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) =>
+                    setProductFile(event.target.files?.[0] || null)
+                  }
+                  required
+                />
+              </label>
 
-              <button className="admin-primary-button" type="submit">
-                + Add Category
+              {productFile && (
+                <p className="admin-section-description">
+                  Selected: {productFile.name}
+                </p>
+              )}
+
+              <label className="product-field-label">
+                Price (ZMW)
+                <input
+                  className="admin-input"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  placeholder="e.g. 150"
+                  value={productPrice}
+                  onChange={(event) =>
+                    setProductPrice(event.target.value)
+                  }
+                  required
+                />
+              </label>
+
+              <button
+                className="admin-primary-button"
+                type="submit"
+                disabled={productSaving}
+              >
+                {productSaving ? "Uploading..." : "+ Add Product"}
               </button>
             </form>
 
-            {categoryError && (
+            {productError && (
               <p className="admin-error" role="alert">
-                {categoryError}
+                {productError}
               </p>
             )}
 
-            {categorySuccess && (
+            {productSuccess && (
               <p className="admin-success" role="status">
-                {categorySuccess}
+                {productSuccess}
               </p>
-            )}
-
-            <h3>Your Categories</h3>
-
-            {categoriesLoading ? (
-              <p className="admin-empty">Loading categories...</p>
-            ) : categories.length === 0 ? (
-              <div className="admin-empty">
-                <p>No categories yet.</p>
-                <p>Add your first category above!</p>
-              </div>
-            ) : (
-              <div className="admin-category-list">
-                {categories.map((category) => (
-                  <div className="admin-category-item" key={category.id}>
-                    {editingCategoryId === category.id ? (
-                      <form
-                        className="admin-form"
-                        style={{ flex: 1, marginBottom: 0 }}
-                        onSubmit={(event) =>
-                          handleRenameCategory(event, category.id)
-                        }
-                      >
-                        <input
-                          className="admin-input"
-                          value={editingCategoryName}
-                          onChange={(event) =>
-                            setEditingCategoryName(event.target.value)
-                          }
-                          maxLength={40}
-                          autoFocus
-                          required
-                        />
-
-                        <button
-                          className="admin-primary-button"
-                          type="submit"
-                        >
-                          Save
-                        </button>
-
-                        <button
-                          className="admin-secondary-button"
-                          type="button"
-                          onClick={() => {
-                            setEditingCategoryId(null);
-                            setEditingCategoryName("");
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </form>
-                    ) : (
-                      <>
-                        <span className="admin-category-name">
-                          {category.name}
-                        </span>
-
-                        <div className="admin-category-actions">
-                          <button
-                            className="admin-edit-button"
-                            onClick={() => {
-                              setEditingCategoryId(category.id);
-                              setEditingCategoryName(category.name);
-                              setCategoryError("");
-                              setCategorySuccess("");
-                            }}
-                          >
-                            Edit
-                          </button>
-
-                          <button
-                            className="admin-delete-button"
-                            onClick={() => handleDeleteCategory(category.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
             )}
           </section>
         </section>
       )}
 
-      <nav className="categories" aria-label="Product categories">
-        <button
-          className={
-            selectedCategory === "all"
-              ? "category active"
-              : "category"
-          }
-          onClick={() => setSelectedCategory("all")}
-        >
-          All
-        </button>
-
-        {categories.map((category) => (
-          <button
-            className={
-              selectedCategory === category.id
-                ? "category active"
-                : "category"
-            }
-            key={category.id}
-            onClick={() => setSelectedCategory(category.id)}
-          >
-            {category.name}
-          </button>
-        ))}
-      </nav>
-
       <section className="catalogue">
-        <div className="empty-state">
-          <div className="empty-icon">◇</div>
-          <h2>Something exciting is being created!</h2>
-          <p>
-            Our catalogue is getting ready.
-            Check back soon!
-          </p>
-        </div>
+        {productsLoading ? (
+          <p className="admin-empty">Loading products...</p>
+        ) : products.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">◇</div>
+            <h2>Something exciting is being created!</h2>
+            <p>
+              Our catalogue is getting ready.
+              Check back soon!
+            </p>
+          </div>
+        ) : (
+          <div className="product-grid">
+            {products.map((product) => (
+              <article className="product-card" key={product.id}>
+                <img
+                  className="product-image"
+                  src={getImageUrl(product.image_path)}
+                  alt="3D printed product"
+                  loading="lazy"
+                />
+
+                <p className="product-price">
+                  K{Number(product.price).toLocaleString("en-ZM")}
+                </p>
+
+                <a
+                  className="product-order-button"
+                  href={`https://wa.me/${WHATSAPP_NUMBER}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Order on WhatsApp
+                </a>
+
+                {isAdmin && (
+                  <div className="product-admin-actions">
+                    <button
+                      className="admin-delete-button"
+                      onClick={() => handleDeleteProduct(product)}
+                    >
+                      Delete Product
+                    </button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <div className="contact-area">
         <p>Have an idea? We'd love to hear about it.</p>
-        <span>WhatsApp ordering coming soon</span>
+        <span>Turning Ideas Into Reality.</span>
       </div>
     </main>
   );
