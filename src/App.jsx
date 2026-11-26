@@ -1,5 +1,6 @@
 
 import React, { useState } from "react";
+import logo from "./Screenshot 2026-11-26 142429.png";
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true);
@@ -9,7 +10,15 @@ export default function App() {
     <main className={darkMode ? "app dark" : "app light"}>
       <header className="header">
         <div className="brand">
-          <div className="logo-placeholder">M+J</div>
+          <img
+            src={logo}
+            alt="M+J 3D Printing"
+            style={{
+              width: "90px",
+              height: "66px",
+              objectFit: "contain"
+            }}
+          />
           <span>M+J 3D Printing</span>
         </div>
 
