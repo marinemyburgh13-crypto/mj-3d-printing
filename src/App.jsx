@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from "react";
 import logo from "./Screenshot 2026-11-26 142429.png";
 import { supabase } from "./supabase";
@@ -379,6 +378,13 @@ export default function App() {
     setPhotoErrorProductId(null);
     setPhotoSuccessId(product.id);
     setReplacingProductId(null);
+
+    // Hide the success message after 3 seconds.
+    window.setTimeout(() => {
+      setPhotoSuccessId((currentId) =>
+        currentId === product.id ? null : currentId
+      );
+    }, 3000);
   }
 
   async function handleDeleteProduct(product) {
