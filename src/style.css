@@ -441,3 +441,20 @@ button:disabled {
 .product-admin-actions > button {
   width: 100%;
 }
+/* REPLACE PRODUCT PHOTO */
+
+.replace-photo-button {
+  display: block;
+  width: 100%;
+  text-align: center;
+  cursor: pointer;
+  position: relative;
+}
+
+.replace-photo-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
