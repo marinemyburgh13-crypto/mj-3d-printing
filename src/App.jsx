@@ -31,6 +31,12 @@ export default function App() {
   const [priceError, setPriceError] = useState("");
   const [priceSuccess, setPriceSuccess] = useState("");
 
+  // Replace product photo state
+  const [replacingProductId, setReplacingProductId] = useState(null);
+  const [photoError, setPhotoError] = useState("");
+  const [photoErrorProductId, setPhotoErrorProductId] = useState(null);
+  const [photoSuccessId, setPhotoSuccessId] = useState(null);
+
   useEffect(() => {
     if (!supabase) return;
 
@@ -271,6 +277,108 @@ export default function App() {
     setEditingPrice("");
     setPriceSuccess("Price updated successfully!");
     setPriceSaving(false);
+  }
+
+  async function handleReplacePhoto(event, product) {
+    const input = event.target;
+    const file = input.files?.[0];
+
+    // Clear the input so the same photo can be selected again if needed.
+    input.value = "";
+
+    if (!file) return;
+
+    setPhotoError("");
+    setPhotoErrorProductId(null);
+    setPhotoSuccessId(null);
+
+    if (!supabase || !isAdmin) {
+      setPhotoError("You must be logged in as admin to replace photos.");
+      setPhotoErrorProductId(product.id);
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Please choose an image file.");
+      setPhotoErrorProductId(product.id);
+      return;
+    }
+
+    if (file.size > 8 * 1024 * 1024) {
+      setPhotoError("The image must be smaller than 8 MB.");
+      setPhotoErrorProductId(product.id);
+      return;
+    }
+
+    setReplacingProductId(product.id);
+
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+    const newImagePath = `${Date.now()}-${safeName}`;
+
+    // Upload the new image first, so the existing photo stays safe if upload fails.
+    const { error: uploadError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(newImagePath, file, {
+        cacheControl: "3600",
+        upsert: false
+      });
+
+    if (uploadError) {
+      setPhotoError("Could not upload the new photo. Please try again.");
+      setPhotoErrorProductId(product.id);
+      console.error("Replacement image upload error:", uploadError.message);
+      setReplacingProductId(null);
+      return;
+    }
+
+    // Only change the product record after the new image has uploaded.
+    const { data, error: updateError } = await supabase
+      .from("products")
+      .update({ image_path: newImagePath })
+      .eq("id", product.id)
+      .select("id")
+      .single();
+
+    if (updateError || !data) {
+      // Keep the old product photo and remove the unused new upload.
+      await supabase.storage
+        .from(STORAGE_BUCKET)
+        .remove([newImagePath]);
+
+      setPhotoError("Could not update the product photo. Please try again.");
+      setPhotoErrorProductId(product.id);
+      console.error(
+        "Product photo update error:",
+        updateError?.message || "No product updated."
+      );
+      setReplacingProductId(null);
+      return;
+    }
+
+    // Update the visible catalogue without changing the product price.
+    setProducts((currentProducts) =>
+      currentProducts.map((item) =>
+        item.id === product.id
+          ? { ...item, image_path: newImagePath }
+          : item
+      )
+    );
+
+    // The new image is now saved, so the old image can be cleaned up.
+    if (product.image_path) {
+      const { error: cleanupError } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .remove([product.image_path]);
+
+      if (cleanupError) {
+        console.error("Old image cleanup error:", cleanupError.message);
+      }
+    }
+
+    setPhotoError("");
+    setPhotoErrorProductId(null);
+    setPhotoSuccessId(product.id);
+    setReplacingProductId(null);
   }
 
   async function handleDeleteProduct(product) {
@@ -560,6 +668,33 @@ export default function App() {
                       >
                         Edit Price
                       </button>
+                    )}
+
+                    <label className="admin-secondary-button replace-photo-button">
+                      {replacingProductId === product.id
+                        ? "Uploading Photo..."
+                        : "Replace Photo"}
+                      <input
+                        className="replace-photo-input"
+                        type="file"
+                        accept="image/*"
+                        disabled={replacingProductId !== null}
+                        onChange={(event) =>
+                          handleReplacePhoto(event, product)
+                        }
+                      />
+                    </label>
+
+                    {photoError && photoErrorProductId === product.id && (
+                      <p className="admin-error" role="alert">
+                        {photoError}
+                      </p>
+                    )}
+
+                    {photoSuccessId === product.id && (
+                      <p className="admin-success" role="status">
+                        Photo replaced successfully!
+                      </p>
                     )}
 
                     <button
