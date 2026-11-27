@@ -24,6 +24,13 @@ export default function App() {
   const [productError, setProductError] = useState("");
   const [productSuccess, setProductSuccess] = useState("");
 
+  // Edit price state
+  const [editingProductId, setEditingProductId] = useState(null);
+  const [editingPrice, setEditingPrice] = useState("");
+  const [priceSaving, setPriceSaving] = useState(false);
+  const [priceError, setPriceError] = useState("");
+  const [priceSuccess, setPriceSuccess] = useState("");
+
   useEffect(() => {
     if (!supabase) return;
 
@@ -119,6 +126,7 @@ export default function App() {
 
     setIsAdmin(false);
     setShowLogin(false);
+    setEditingProductId(null);
   }
 
   async function handleAddProduct(event) {
@@ -203,6 +211,66 @@ export default function App() {
     setProductSaving(false);
 
     await loadProducts();
+  }
+
+  function startEditingPrice(product) {
+    setEditingProductId(product.id);
+    setEditingPrice(String(product.price));
+    setPriceError("");
+    setPriceSuccess("");
+  }
+
+  function cancelEditingPrice() {
+    setEditingProductId(null);
+    setEditingPrice("");
+    setPriceError("");
+  }
+
+  async function handleUpdatePrice(event, product) {
+    event.preventDefault();
+
+    if (!supabase || !isAdmin) {
+      setPriceError("You must be logged in as admin to edit prices.");
+      return;
+    }
+
+    const price = Number(editingPrice);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      setPriceError("Please enter a valid price greater than zero.");
+      return;
+    }
+
+    setPriceSaving(true);
+    setPriceError("");
+    setPriceSuccess("");
+
+    const { data, error } = await supabase
+      .from("products")
+      .update({ price })
+      .eq("id", product.id)
+      .select("id")
+      .single();
+
+    if (error || !data) {
+      setPriceError("Could not update the price. Please try again.");
+      console.error("Price update error:", error?.message || "No product updated.");
+      setPriceSaving(false);
+      return;
+    }
+
+    setProducts((currentProducts) =>
+      currentProducts.map((item) =>
+        item.id === product.id
+          ? { ...item, price }
+          : item
+      )
+    );
+
+    setEditingProductId(null);
+    setEditingPrice("");
+    setPriceSuccess("Price updated successfully!");
+    setPriceSaving(false);
   }
 
   async function handleDeleteProduct(product) {
@@ -438,6 +506,62 @@ export default function App() {
 
                 {isAdmin && (
                   <div className="product-admin-actions">
+                    {editingProductId === product.id ? (
+                      <form
+                        className="product-edit-form"
+                        onSubmit={(event) =>
+                          handleUpdatePrice(event, product)
+                        }
+                      >
+                        <label>
+                          Edit Price (ZMW)
+                          <input
+                            className="admin-input"
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={editingPrice}
+                            onChange={(event) =>
+                              setEditingPrice(event.target.value)
+                            }
+                            required
+                          />
+                        </label>
+
+                        {priceError && (
+                          <p className="admin-error" role="alert">
+                            {priceError}
+                          </p>
+                        )}
+
+                        <div className="product-edit-actions">
+                          <button
+                            className="admin-primary-button"
+                            type="submit"
+                            disabled={priceSaving}
+                          >
+                            {priceSaving ? "Saving..." : "Save Price"}
+                          </button>
+
+                          <button
+                            className="admin-secondary-button"
+                            type="button"
+                            onClick={cancelEditingPrice}
+                            disabled={priceSaving}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <button
+                        className="admin-secondary-button"
+                        onClick={() => startEditingPrice(product)}
+                      >
+                        Edit Price
+                      </button>
+                    )}
+
                     <button
                       className="admin-delete-button"
                       onClick={() => handleDeleteProduct(product)}
