@@ -353,6 +353,13 @@ export default function App() {
     setEditingName("");
     setNameSuccessId(product.id);
     setNameSaving(false);
+
+    // Hide the name success message after 3 seconds.
+    window.setTimeout(() => {
+      setNameSuccessId((currentId) =>
+        currentId === product.id ? null : currentId
+      );
+    }, 3000);
   }
 
   async function handleReplacePhoto(event, product) {
