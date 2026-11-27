@@ -19,6 +19,7 @@ export default function App() {
 
   const [productFile, setProductFile] = useState(null);
   const [productPrice, setProductPrice] = useState("");
+  const [productName, setProductName] = useState("");
   const [productSaving, setProductSaving] = useState(false);
   const [productError, setProductError] = useState("");
   const [productSuccess, setProductSuccess] = useState("");
@@ -29,6 +30,14 @@ export default function App() {
   const [priceSaving, setPriceSaving] = useState(false);
   const [priceError, setPriceError] = useState("");
   const [priceSuccess, setPriceSuccess] = useState("");
+
+  // Edit product name state
+  const [editingNameProductId, setEditingNameProductId] = useState(null);
+  const [editingName, setEditingName] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState("");
+  const [nameErrorProductId, setNameErrorProductId] = useState(null);
+  const [nameSuccessId, setNameSuccessId] = useState(null);
 
   // Replace product photo state
   const [replacingProductId, setReplacingProductId] = useState(null);
@@ -74,7 +83,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from("products")
-      .select("id, price, image_path");
+      .select("id, name, price, image_path");
 
     if (error) {
       setProductError("Could not load products. Please refresh the page.");
@@ -132,6 +141,7 @@ export default function App() {
     setIsAdmin(false);
     setShowLogin(false);
     setEditingProductId(null);
+    setEditingNameProductId(null);
   }
 
   async function handleAddProduct(event) {
@@ -193,6 +203,7 @@ export default function App() {
     const { error: insertError } = await supabase
       .from("products")
       .insert({
+        name: productName.trim() || null,
         price,
         image_path: imagePath
       });
@@ -210,6 +221,7 @@ export default function App() {
 
     setProductFile(null);
     setProductPrice("");
+    setProductName("");
     event.target.reset();
 
     setProductSuccess("Product added successfully!");
@@ -276,6 +288,71 @@ export default function App() {
     setEditingPrice("");
     setPriceSuccess("Price updated successfully!");
     setPriceSaving(false);
+  }
+
+  // Start editing a product name
+  function startEditingName(product) {
+    setEditingNameProductId(product.id);
+    setEditingName(product.name || "");
+    setNameError("");
+    setNameErrorProductId(null);
+    setNameSuccessId(null);
+  }
+
+  // Cancel editing a product name
+  function cancelEditingName() {
+    setEditingNameProductId(null);
+    setEditingName("");
+    setNameError("");
+    setNameErrorProductId(null);
+  }
+
+  // Save or remove a product name
+  async function handleUpdateName(event, product) {
+    event.preventDefault();
+
+    if (!supabase || !isAdmin) {
+      setNameError("You must be logged in as admin to edit names.");
+      setNameErrorProductId(product.id);
+      return;
+    }
+
+    setNameSaving(true);
+    setNameError("");
+    setNameErrorProductId(null);
+
+    const newName = editingName.trim() || null;
+
+    const { data, error } = await supabase
+      .from("products")
+      .update({ name: newName })
+      .eq("id", product.id)
+      .select("id")
+      .single();
+
+    if (error || !data) {
+      setNameError("Could not update the name. Please try again.");
+      setNameErrorProductId(product.id);
+      console.error(
+        "Name update error:",
+        error?.message || "No product updated."
+      );
+      setNameSaving(false);
+      return;
+    }
+
+    setProducts((currentProducts) =>
+      currentProducts.map((item) =>
+        item.id === product.id
+          ? { ...item, name: newName }
+          : item
+      )
+    );
+
+    setEditingNameProductId(null);
+    setEditingName("");
+    setNameSuccessId(product.id);
+    setNameSaving(false);
   }
 
   async function handleReplacePhoto(event, product) {
@@ -354,7 +431,7 @@ export default function App() {
       return;
     }
 
-    // Update the visible catalogue without changing the product price.
+    // Update the visible catalogue without changing the product price or name.
     setProducts((currentProducts) =>
       currentProducts.map((item) =>
         item.id === product.id
@@ -516,7 +593,7 @@ export default function App() {
             <h2>Add a Product</h2>
 
             <p className="admin-section-description">
-              Upload a picture and enter its price.
+              Upload a picture, enter its price, and optionally give it a name.
             </p>
 
             <form
@@ -541,6 +618,19 @@ export default function App() {
                   Selected: {productFile.name}
                 </p>
               )}
+
+              <label className="product-field-label">
+                Product name (optional)
+                <input
+                  className="admin-input"
+                  type="text"
+                  placeholder="e.g. Custom Keychain"
+                  value={productName}
+                  onChange={(event) =>
+                    setProductName(event.target.value)
+                  }
+                />
+              </label>
 
               <label className="product-field-label">
                 Price (ZMW)
@@ -601,9 +691,15 @@ export default function App() {
                 <img
                   className="product-image"
                   src={getImageUrl(product.image_path)}
-                  alt="3D printed product"
+                  alt={product.name || "3D printed product"}
                   loading="lazy"
                 />
+
+                {product.name && (
+                  <h3 className="product-name">
+                    {product.name}
+                  </h3>
+                )}
 
                 <p className="product-price">
                   K{Number(product.price).toLocaleString("en-ZM")}
@@ -620,6 +716,70 @@ export default function App() {
 
                 {isAdmin && (
                   <div className="product-admin-actions">
+
+                    {/* EDIT PRODUCT NAME */}
+                    {editingNameProductId === product.id ? (
+                      <form
+                        className="product-edit-form"
+                        onSubmit={(event) =>
+                          handleUpdateName(event, product)
+                        }
+                      >
+                        <label>
+                          Edit Product Name
+                          <input
+                            className="admin-input"
+                            type="text"
+                            placeholder="Leave blank to remove the name"
+                            value={editingName}
+                            onChange={(event) =>
+                              setEditingName(event.target.value)
+                            }
+                          />
+                        </label>
+
+                        {nameError &&
+                          nameErrorProductId === product.id && (
+                            <p className="admin-error" role="alert">
+                              {nameError}
+                            </p>
+                          )}
+
+                        <div className="product-edit-actions">
+                          <button
+                            className="admin-primary-button"
+                            type="submit"
+                            disabled={nameSaving}
+                          >
+                            {nameSaving ? "Saving..." : "Save Name"}
+                          </button>
+
+                          <button
+                            className="admin-secondary-button"
+                            type="button"
+                            onClick={cancelEditingName}
+                            disabled={nameSaving}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <button
+                        className="admin-secondary-button"
+                        onClick={() => startEditingName(product)}
+                      >
+                        Edit Name
+                      </button>
+                    )}
+
+                    {nameSuccessId === product.id && (
+                      <p className="admin-success" role="status">
+                        Name updated successfully!
+                      </p>
+                    )}
+
+                    {/* EDIT PRICE */}
                     {editingProductId === product.id ? (
                       <form
                         className="product-edit-form"
@@ -676,6 +836,7 @@ export default function App() {
                       </button>
                     )}
 
+                    {/* REPLACE PHOTO */}
                     <label className="admin-secondary-button replace-photo-button">
                       {replacingProductId === product.id
                         ? "Uploading Photo..."
